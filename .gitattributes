@@ -1,0 +1,5 @@
+# Windows 编辑 yaml 容易让 git 把行尾转 CRLF，GitHub Actions parser 偶发会在
+# CRLF 上崩掉 schedule 触发器（workflow 仍能 dispatch、看似正常但 cron 不跑）。
+# 强制所有 yaml 文件以 LF 行尾入库，从根上消除这个隐患。
+*.yml text eol=lf
+*.yaml text eol=lf

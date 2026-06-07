@@ -270,6 +270,7 @@ Vix Warning System/
 ├── config.yaml             # 阈值/间隔/去重/静默/分位窗口（阶段 3 ✅）
 ├── requirements.txt        # 直接依赖 + 平台标记 winotify (Windows-only)（阶段 4 ✅）
 ├── .gitignore              # 屏蔽 venv / .env / logs / data / .claude（阶段 1+3+4 ✅）
+├── .gitattributes          # 强制 *.yml/*.yaml 用 LF 行尾，规避 Windows CRLF 隐患
 ├── .env                    # 本地用：BARK_KEY 等（云端走 GitHub Secrets）
 ├── PROJECT_PLAN.md         # 本文档
 ├── .github/workflows/
