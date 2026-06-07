@@ -1,0 +1,29 @@
+# Virtual environment
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Sensitive config
+.env
+*.local.yaml
+
+# Logs
+logs/
+*.log
+
+# Runtime state (dedup cache 等)
+data/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
