@@ -190,13 +190,44 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 - ✅ 去重：立即重跑 → 日志 `VIX: 'VIX_警戒' 在 6h 去重窗口内，跳过`，无推送。
 - ✅ 静默：mock 02:30 北京时间 → 日志 `VIX: 命中静默时段 [00:00-09:00]，跳过`，无推送。
 
-### 阶段 4：长期运行（半天）
-1. 让程序后台常驻：
-   - 方案 A：Windows 任务计划程序，每 N 分钟启动一次。
-   - 方案 B：写成 Windows 服务（用 `nssm` 工具包装）。
-   - 方案 C：直接 `pythonw main.py` 后台跑。
-2. 加日志（`logging` 模块），方便排查问题。
-3. 加异常捕获（网络断了不能让程序挂掉）。
+### 阶段 4：常驻运行 — GitHub Actions 云端调度 ✅ 已完成
+
+**决策**：弃用本地常驻方案，**完全用 GitHub Actions 取代**。优点是电脑关机也有提醒；缺点是没有桌面 toast、调度有 5-15 分钟延迟。
+
+**Actions 的硬限制（已规避）**：
+
+| 限制 | 应对 |
+| --- | --- |
+| 容器无桌面 | `notifier.py` 把 `winotify` 改成条件导入；`main.py` 检测 `sys.platform != "win32"` 自动从通道列表里剔除桌面 |
+| 容器每次销毁，`data/dedup.json` 不持久 | 用 `actions/cache@v4` 把整个 `data/` 目录跨 run 复用（key 唯一 + restore-keys 前缀匹配） |
+| `.env` 不能进仓库 | `BARK_KEY` 等通过 **GitHub Secrets** 注入到环境变量 |
+| 容器是 UTC 时间 | workflow 顶层 `env: TZ: Asia/Shanghai`，`datetime.now()` 自动返回北京时间 |
+| 仓库 60 天无活动会自动停 cron | 写进文档，需要时进 Actions 手动重启 |
+| Python 3.14 在 Linux 上 wheel 不全 | Actions 用 **Python 3.12**（本地仍用 3.14；代码只使用 3.10+ 共有语法） |
+| pandas/numpy 等编译耗时 | `actions/setup-python` 的 `cache: pip` 复用 pip wheel 缓存，二次起接近秒级 |
+
+**代码改动**：
+
+- `main.py`：加 `--once` 模式（单次执行后退出，云端用）；`DESKTOP_AVAILABLE = sys.platform == "win32"` 自动决定是否进入桌面通道。
+- `src/notifier.py`：`winotify` 改成 `try/except ImportError`；`desktop_popup` 在非 Windows 抛 `RuntimeError`，被 `main.py` 的 try/except 捕获记 WARN。env 读取容空（`BARK_SERVER`/`BARK_SOUND` 未配置时回落到代码默认）。
+- `requirements.txt`：精简为直接依赖，`winotify` 加 `sys_platform == "win32"` 平台标记。Linux Actions 自动跳过 winotify 安装。
+
+**workflow 文件**：`.github/workflows/vix-check.yml`
+
+- 触发：`cron: '*/15 1-15 * * *'`（UTC = 北京时间 09:00–23:59，与 `quiet_hours` 对齐，省 CI 分钟）+ `workflow_dispatch` 手动触发。
+- 并发：`concurrency: group: vix-check, cancel-in-progress: false`，避免上一次未跑完下一次覆盖 dedup。
+- 步骤：checkout → setup-python 3.12 → install deps → 恢复 dedup cache → `python main.py --once` → 上传 `logs/` artifact（7 天保留）。
+- 超时：`timeout-minutes: 5`。
+
+**用户手动操作（一次性）**：
+
+1. **强烈建议先在 Bark App 重新生成密钥**（旧 key 已出现在对话历史里）。
+2. GitHub 仓库 → Settings → Secrets and variables → Actions → New repository secret：
+   - `BARK_KEY` = 新的 16 位 key（必填）
+   - `BARK_SERVER` = `https://api.day.app`（可选，留空走默认）
+   - `BARK_SOUND` = `alarm`（可选）
+3. 进 Actions 页面 → 选 "VIX Warning (cloud)" workflow → 点 "Run workflow" 手动跑一次验证。
+4. 验证通过后无需操作，每 15 分钟（北京 09:00-23:59）自动跑。
 
 ### 阶段 5（可选）：自己算 iVIX
 1. 拉取 50ETF 期权链：AKShare 的 `option_finance_board`。
@@ -209,26 +240,24 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 
 ```
 Vix Warning System/
-├── main.py                 # 入口、调度、Context、多通道分发（阶段 1+2+3 ✅）
+├── main.py                 # 入口（支持 --once）、调度、Context、多通道分发（阶段 1+2+3+4 ✅）
 ├── config.yaml             # 阈值/间隔/去重/静默/分位窗口（阶段 3 ✅）
-├── requirements.txt        # 已固定依赖版本（阶段 1 ✅）
-├── .gitignore              # 屏蔽 venv / .env / logs / data（阶段 1+3 ✅）
-├── .env                    # BARK_KEY / BARK_SERVER / BARK_SOUND（阶段 2 ✅）
+├── requirements.txt        # 直接依赖 + 平台标记 winotify (Windows-only)（阶段 4 ✅）
+├── .gitignore              # 屏蔽 venv / .env / logs / data / .claude（阶段 1+3+4 ✅）
+├── .env                    # 本地用：BARK_KEY 等（云端走 GitHub Secrets）
 ├── PROJECT_PLAN.md         # 本文档
+├── .github/workflows/
+│   └── vix-check.yml       # GitHub Actions：每 15 分钟跑 --once（阶段 4 ✅）
 ├── venv/                   # 虚拟环境（不进 git）
 ├── src/
 │   ├── __init__.py
 │   ├── data_fetcher.py     # get_vix/get_qvix + get_vix_history/get_qvix_50etf_history  ✅
-│   ├── notifier.py         # desktop_popup() + bark_push()  ✅
+│   ├── notifier.py         # desktop_popup（跨平台守护）+ bark_push()  ✅
 │   └── indicators.py       # Thresholds/classify/percentile_rank/in_quiet_hours/Deduper  ✅
-├── data/                   # 运行时状态（不进 git）
+├── data/                   # 运行时状态（云端走 actions/cache，本地走文件）
 │   └── dedup.json          # 去重持久化状态
 └── logs/
-    └── main.log            # 运行日志（UTF-8）
-
-# 阶段 4 将做：Windows 任务计划 / nssm 后台常驻 / 异常重试退避
-# 阶段 5 将做（可选）：自算 iVIX（拉 50ETF 期权链 + CBOE VIX 白皮书公式）
-# 阶段 2 计划过 src/alerts.py，实际两通道直接内联，等加第 3 通道时再抽。
+    └── main.log            # 运行日志（UTF-8；云端会作为 artifact 上传）
 ```
 
 ---

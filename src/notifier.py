@@ -4,17 +4,24 @@ import sys
 
 import requests
 from dotenv import load_dotenv
-from winotify import Notification, audio
+
+try:
+    from winotify import Notification, audio  # type: ignore
+    _HAS_WINOTIFY = True
+except ImportError:
+    _HAS_WINOTIFY = False
 
 APP_NAME = "VIX 预警"
 
 load_dotenv()
 BARK_KEY = os.getenv("BARK_KEY", "").strip()
-BARK_SERVER = os.getenv("BARK_SERVER", "https://api.day.app").rstrip("/")
-BARK_SOUND_URGENT = os.getenv("BARK_SOUND", "alarm")
+BARK_SERVER = (os.getenv("BARK_SERVER") or "https://api.day.app").rstrip("/")
+BARK_SOUND_URGENT = os.getenv("BARK_SOUND") or "alarm"
 
 
 def desktop_popup(title: str, message: str, urgent: bool = False) -> None:
+    if not _HAS_WINOTIFY:
+        raise RuntimeError("winotify 不可用（当前平台非 Windows 或未安装）")
     toast = Notification(
         app_id=APP_NAME,
         title=title,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 import time as _time
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +23,9 @@ from src.notifier import bark_push, desktop_popup
 ROOT = Path(__file__).parent
 CONFIG_PATH = ROOT / "config.yaml"
 STATE_FILE = ROOT / "data" / "dedup.json"
+
+# 非 Windows 平台（如 GitHub Actions Linux 容器）自动跳过桌面 toast
+DESKTOP_AVAILABLE = sys.platform == "win32"
 
 LOG_DIR = ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True)
@@ -98,7 +102,11 @@ def _send_alert(ctx: Context, label: str, q: Quote, level: str | None, history: 
     urgent = level in ("恐慌", "极度恐慌")
 
     any_ok = False
-    for ch_name, ch_fn in (("桌面", desktop_popup), ("Bark", bark_push)):
+    channels: list[tuple[str, callable]] = []
+    if DESKTOP_AVAILABLE:
+        channels.append(("桌面", desktop_popup))
+    channels.append(("Bark", bark_push))
+    for ch_name, ch_fn in channels:
         try:
             ch_fn(title, message, urgent=urgent)
             any_ok = True
@@ -130,11 +138,16 @@ def check_once(ctx: Context) -> None:
 
 def main() -> None:
     ctx = Context()
+    once = "--once" in sys.argv
     log.info(
-        f"启动：interval={ctx.cfg['interval_min']}min, dedup={ctx.cfg['dedup_hours']}h, "
+        f"启动：mode={'once' if once else 'loop'}, "
+        f"desktop={'on' if DESKTOP_AVAILABLE else 'off (非 Windows)'}, "
+        f"interval={ctx.cfg['interval_min']}min, dedup={ctx.cfg['dedup_hours']}h, "
         f"quiet={ctx.quiet_start}-{ctx.quiet_end}, window={ctx.window}d"
     )
     check_once(ctx)
+    if once:
+        return
     schedule.every(ctx.cfg["interval_min"]).minutes.do(check_once, ctx)
     while True:
         schedule.run_pending()
