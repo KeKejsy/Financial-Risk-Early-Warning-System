@@ -1,6 +1,6 @@
 name: Keepalive Reminder
 
-# 每天探，距上次提醒 >= 55 天才推 Bark。提醒后用户去手动 Run vix-check.yml
+# 每天探，距上次提醒 >= 55 天才推 Bark。提醒后用户去手动 Run vix-monitor.yml
 # 即可重置 60 天 cron 禁用计时（scheduled run 本身不算活动）。
 on:
   schedule:
@@ -53,9 +53,9 @@ jobs:
         run: |
           set -e
           : "${BARK_SERVER:=https://api.day.app}"
-          URL="https://github.com/${REPO}/actions/workflows/vix-check.yml"
+          URL="https://github.com/${REPO}/actions/workflows/vix-monitor.yml"
           curl -sS --fail -X POST "${BARK_SERVER}/${BARK_KEY}" \
             -H "Content-Type: application/json" \
-            -d "$(printf '{"title":"VIX 系统保活提醒","body":"已 %s 天未保活。点开链接进 Actions 手动 Run vix-check.yml 重置 60 天 cron 禁用计时。","group":"VIX预警保活","level":"active","url":"%s"}' "$ELAPSED" "$URL")"
+            -d "$(printf '{"title":"VIX 系统保活提醒","body":"已 %s 天未保活。点开链接进 Actions 手动 Run vix-monitor.yml 重置 60 天 cron 禁用计时。","group":"VIX预警保活","level":"active","url":"%s"}' "$ELAPSED" "$URL")"
           date +%s > .last_reminder
           echo "已发送提醒，时间戳已更新"
