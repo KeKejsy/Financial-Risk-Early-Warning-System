@@ -199,7 +199,7 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 | 限制 | 应对 |
 | --- | --- |
 | 容器无桌面 | `notifier.py` 把 `winotify` 改成条件导入；`main.py` 检测 `sys.platform != "win32"` 自动从通道列表里剔除桌面 |
-| 容器每次销毁，`data/dedup.json` 不持久 | 用 `actions/cache@v4` 把整个 `data/` 目录跨 run 复用（key 唯一 + restore-keys 前缀匹配） |
+| 容器每次销毁，`data/dedup.json` 不持久 | 用 `actions/cache@v5` 把整个 `data/` 目录跨 run 复用（key 唯一 + restore-keys 前缀匹配） |
 | `.env` 不能进仓库 | `BARK_KEY` 等通过 **GitHub Secrets** 注入到环境变量 |
 | 容器是 UTC 时间 | workflow 顶层 `env: TZ: Asia/Shanghai`，`datetime.now()` 自动返回北京时间 |
 | 仓库 60 天无活动会自动停 cron | 写进文档，需要时进 Actions 手动重启 |
