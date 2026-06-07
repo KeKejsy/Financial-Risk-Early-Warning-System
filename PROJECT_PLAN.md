@@ -204,6 +204,7 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 | `.env` 不能进仓库 | `BARK_KEY` 等通过 **GitHub Secrets** 注入到环境变量 |
 | 容器是 UTC 时间 | workflow 顶层 `env: TZ: Asia/Shanghai`，`datetime.now()` 自动返回北京时间 |
 | 仓库 60 天无 user-triggered 活动会自动停 cron | 新增 `keepalive-reminder.yml`：每天探，距上次提醒 ≥ 55 天才推 Bark，提醒用户去手动 Run workflow 重置计时 |
+| GitHub free tier 在每小时 `:00` 高峰会延迟甚至跳过 scheduled run | cron 触发点从 `*/15`（:00/:15/:30/:45）改成 `7-52/15`（:07/:22/:37/:52），错开整点，提升准时率 |
 | Python 3.14 在 Linux 上 wheel 不全 | Actions 用 **Python 3.12**（本地仍用 3.14；代码只使用 3.10+ 共有语法） |
 | pandas/numpy 等编译耗时 | `actions/setup-python` 的 `cache: pip` 复用 pip wheel 缓存，二次起接近秒级 |
 
@@ -217,7 +218,7 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 
 `.github/workflows/vix-check.yml` — 核心检查
 
-- 触发：`cron: '*/15 1-15 * * *'`（UTC = 北京时间 09:00–23:59，与 `quiet_hours` 对齐，省 CI 分钟）+ `workflow_dispatch` 手动触发。
+- 触发：`cron: '7-52/15 1-15 * * *'`（UTC = 北京时间 09:00–23:59，与 `quiet_hours` 对齐，省 CI 分钟；触发点 :07/:22/:37/:52 错开整点高峰）+ `workflow_dispatch` 手动触发。
 - 并发：`concurrency: group: vix-check, cancel-in-progress: false`，避免上一次未跑完下一次覆盖 dedup。
 - 步骤：checkout → setup-python 3.12 → install deps → 恢复 dedup cache → `python main.py --once` → 上传 `logs/` artifact（7 天保留）。
 - 超时：`timeout-minutes: 5`。
