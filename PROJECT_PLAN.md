@@ -171,7 +171,7 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 | QVIX 历史 252 日 | `ak.index_option_50etf_qvix()` | 直接返回 2700+ 行日线，tail(252) 即可。 |
 | 分级（含反向 `warn_low`） | `src/indicators.py::classify` | "过度平静" 作为反向告警等级。 |
 | 历史分位 | `src/indicators.py::percentile_rank` | 样本 < 30 行返回 None（告警中显示"数据不足"）。 |
-| 去重 | `src/indicators.py::Deduper` | key = `"{label}_{level_or_异动}"`，状态持久化到 `data/dedup.json`（程序重启不丢）。 |
+| 去重 | `src/indicators.py::Deduper` | 两层去重：(1) `should_send/mark_sent` 同警报 key 在 N 小时窗口内不重复（key = `"{label}_{level_or_异动}"`）；(2) `is_repeat_quote/mark_quote_seen` 同 label 的同一笔行情 timestamp 只推一次。**非交易时段 Sina 持续返回上一收盘价 → 第二层会拦下重复推送**。状态持久化到 `data/dedup.json`，程序重启不丢。 |
 | 静默时段 | `src/indicators.py::in_quiet_hours` | 支持跨午夜（如 22:00–07:00）；按本地时间比较。 |
 | 配置 | `config.yaml`（阈值、间隔、去重小时、静默、分位窗口） + `.env`（凭据） | yaml 改后重启 main.py 生效。 |
 
@@ -188,6 +188,7 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 - ✅ 单元测：`classify` 含 `warn_low`（VIX<13 → "过度平静"）、`in_quiet_hours` 跨午夜、`percentile_rank` 在实际历史上 21.50 = 86% 分位。
 - ✅ 实测推送：`VIX 警戒: 21.50  [86% 分位]` 同时打到桌面 + Bark。
 - ✅ 去重：立即重跑 → 日志 `VIX: 'VIX_警戒' 在 6h 去重窗口内，跳过`，无推送。
+- ✅ 行情 timestamp 去重：Sina 在非交易时段返回相同的 timestamp（如美股已收盘，timestamp 一直是 04:15:01），第二轮检查直接日志 `VIX: 报价 timestamp ... 未刷新，跳过`，不进入告警管道。**对应"每个收盘只推一次总结"语义**。
 - ✅ 静默：mock 02:30 北京时间 → 日志 `VIX: 命中静默时段 [00:00-09:00]，跳过`，无推送。
 
 ### 阶段 4：常驻运行 — GitHub Actions 云端调度 ✅ 已完成
@@ -265,7 +266,7 @@ Vix Warning System/
 ## 六、注意事项与坑
 
 1. **A 股交易时段**：iVIX 只在 9:30–15:00 有效，其他时段不要触发"实时"警报。
-2. **VIX 时区**：美东时间 9:30–16:00 才有日内数据，注意时区换算。
+2. **VIX 时区**：美东时间 9:30–16:00 才有日内数据（DST 时 = 北京 21:30–04:00；标准时 = 22:30–05:00）。非交易时段 Sina 持续返回上一收盘价 → 由 `Deduper` 的"行情 timestamp 去重"保证每个收盘只触发一次告警（先到达本逻辑的那次推送）。
 3. **数据延迟**：免费接口通常延迟 15 分钟，对预警场景一般够用。
 4. **接口限流**：AKShare 与 Sina 行情都有频率限制，调度间隔不要短于 1 分钟。
 5. **敏感信息**：Bark key、邮箱密码绝不要硬编码进代码或提交到仓库（`.gitignore` 已屏蔽 `.env`）。

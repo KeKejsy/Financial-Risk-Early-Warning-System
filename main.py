@@ -80,6 +80,11 @@ class Context:
 
 def _send_alert(ctx: Context, label: str, q: Quote, level: str | None, history: list[float]) -> None:
     """组装消息 → 去重 → 多通道分发；通过则 mark_sent。"""
+    # 行情时间戳未变（如非交易时段 Sina 持续返回上一收盘）→ 直接跳过
+    if ctx.dedup.is_repeat_quote(label, q.timestamp):
+        log.info(f"{label}: 报价 timestamp {q.timestamp} 未刷新，跳过")
+        return
+
     surged = abs(q.change_pct) >= ctx.surge_pct
     if not level and not surged:
         return
@@ -115,6 +120,7 @@ def _send_alert(ctx: Context, label: str, q: Quote, level: str | None, history: 
 
     if any_ok:
         ctx.dedup.mark_sent(key, now)
+        ctx.dedup.mark_quote_seen(label, q.timestamp)
         log.info(f"已推送: {title} | {message}")
 
 

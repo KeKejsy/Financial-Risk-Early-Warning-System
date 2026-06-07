@@ -83,6 +83,18 @@ class Deduper:
 
     def mark_sent(self, key: str, now: datetime) -> None:
         self._state[key] = now.isoformat(timespec="seconds")
+        self._persist()
+
+    def is_repeat_quote(self, label: str, quote_ts: str) -> bool:
+        """该 label 的上次行情 timestamp 是否与本次相同（行情未刷新）。"""
+        return self._state.get(f"__last_ts__{label}") == quote_ts
+
+    def mark_quote_seen(self, label: str, quote_ts: str) -> None:
+        """记录已处理过的行情 timestamp，避免下次重复推同一笔报价。"""
+        self._state[f"__last_ts__{label}"] = quote_ts
+        self._persist()
+
+    def _persist(self) -> None:
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.state_file.write_text(
             json.dumps(self._state, ensure_ascii=False, indent=2),
