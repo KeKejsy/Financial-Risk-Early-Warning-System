@@ -1,11 +1,10 @@
 name: VIX Warning (cloud)
 
-# 仅北京时间 09:00–23:59 触发（= UTC 01:00–15:59），与 config.yaml 的静默时段对齐
-# 注意：仓库 60 天无活动后 GitHub 会自动停掉 cron，需要时进 Actions 手动重启
-# cron 用 :07/:22/:37/:52 错开整点，规避 GitHub free tier 在每小时 :00 的高峰延迟/跳过
+# 由 cron-job.org 外部 POST dispatches API 触发：北京时间 09:00–23:59 内
+# 每小时 :07 / :37 调一次。GitHub 端 schedule 在本仓库 / 账户上验证过整体
+# 失效（重命名 workflow、canary 测试均无 schedule 触发），故彻底放弃
+# `on.schedule`，仅留 `workflow_dispatch` 作为唯一入口。
 on:
-  schedule:
-    - cron: '7-52/15 1-15 * * *'
   workflow_dispatch:
 
 permissions:

@@ -203,9 +203,7 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 | 容器每次销毁，`data/dedup.json` 不持久 | 用 `actions/cache@v5` 把整个 `data/` 目录跨 run 复用（key 唯一 + restore-keys 前缀匹配） |
 | `.env` 不能进仓库 | `BARK_KEY` 等通过 **GitHub Secrets** 注入到环境变量 |
 | 容器是 UTC 时间 | workflow 顶层 `env: TZ: Asia/Shanghai`，`datetime.now()` 自动返回北京时间 |
-| 仓库 60 天无 user-triggered 活动会自动停 cron | 新增 `keepalive-reminder.yml`：每天探，距上次提醒 ≥ 55 天才推 Bark，提醒用户去手动 Run workflow 重置计时 |
-| GitHub free tier 在每小时 `:00` 高峰会延迟甚至跳过 scheduled run | cron 触发点从 `*/15`（:00/:15/:30/:45）改成 `7-52/15`（:07/:22/:37/:52），错开整点，提升准时率 |
-| schedule 触发器在 workflow 文件未变更时偶发"静默不注册"（workflow enabled、yaml 合法、dispatch 能跑，但 cron 从不触发；社区已知问题） | 重命名 workflow 文件 `vix-check.yml` → `vix-monitor.yml`，强制 GitHub 按新路径重新注册 schedule |
+| 仓库 60 天无活动 → GitHub 自动停 cron；本仓库 / 账户的 schedule 触发器**整体静默失效**（重命名 workflow、最小 canary 测试都拿不到 schedule 触发，仅 dispatch 能跑） | **彻底放弃 `on.schedule`**，改用 [cron-job.org](https://cron-job.org/) 每 30 分钟 POST GitHub `dispatches` API 触发 `vix-monitor.yml`，外部触发的 API 调用本身也算 user activity，顺带不再需要 60 天保活机制 |
 | Python 3.14 在 Linux 上 wheel 不全 | Actions 用 **Python 3.12**（本地仍用 3.14；代码只使用 3.10+ 共有语法） |
 | pandas/numpy 等编译耗时 | `actions/setup-python` 的 `cache: pip` 复用 pip wheel 缓存，二次起接近秒级 |
 
@@ -219,17 +217,17 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 
 `.github/workflows/vix-monitor.yml` — 核心检查
 
-- 触发：`cron: '7-52/15 1-15 * * *'`（UTC = 北京时间 09:00–23:59，与 `quiet_hours` 对齐，省 CI 分钟；触发点 :07/:22/:37/:52 错开整点高峰）+ `workflow_dispatch` 手动触发。
+- 触发：仅 `workflow_dispatch`。**不再用 `on.schedule`**（在本仓库 / 账户上整体失效，详见限制表第 5 行）。由 cron-job.org 外部 POST `dispatches` API 调起。
 - 并发：`concurrency: group: vix-check, cancel-in-progress: false`，避免上一次未跑完下一次覆盖 dedup。
 - 步骤：checkout → setup-python 3.12 → install deps → 恢复 dedup cache → `python main.py --once` → 上传 `logs/` artifact（7 天保留）。
 - 超时：`timeout-minutes: 5`。
 
-`.github/workflows/keepalive-reminder.yml` — 保活提醒
+**外部触发（cron-job.org）**：
 
-- 触发：`cron: '7 6 * * *'`（每天 UTC 06:07 = 北京 14:07）+ `workflow_dispatch`。
-- 用 `actions/cache@v5` 持久化 `.last_reminder`（unix 秒数时间戳）；每次比较距今天数 ≥ 55 才推 Bark。
-- 推送内容含 `vix-monitor.yml` 的 Actions 链接，点过去手动 Run 即可重置 60 天 cron 计时。
-- 失败保护：curl `--fail` + `set -e`，推送失败则 `.last_reminder` 不更新，次日自动重试。
+- 频率：北京时间 09:00–23:59 内每小时 `:07` 和 `:37`（每 30 分钟一次，错开 `:00` 高峰）。
+- 请求：`POST https://api.github.com/repos/<owner>/<repo>/actions/workflows/vix-monitor.yml/dispatches`，body `{"ref":"main"}`。
+- Headers：`Authorization: Bearer <fine-grained PAT>`、`Accept: application/vnd.github+json`、`X-GitHub-Api-Version: 2022-11-28`。
+- PAT 权限最小化：仅 `Actions: Read and write`，仅授权本仓库。
 
 **用户手动操作（一次性）**：
 
@@ -238,8 +236,10 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
    - `BARK_KEY` = 新的 16 位 key（必填）
    - `BARK_SERVER` = `https://api.day.app`（可选，留空走默认）
    - `BARK_SOUND` = `alarm`（可选）
-3. 进 Actions 页面 → 选 "VIX Warning (cloud)" workflow → 点 "Run workflow" 手动跑一次验证。
-4. 验证通过后无需操作，每 15 分钟（北京 09:00-23:59）自动跑。
+3. GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens 创建 PAT：仅 `Actions: Read and write`，仅授权本仓库。复制 token。
+4. 注册 [cron-job.org](https://cron-job.org/) → 新建 cron job：见上 "外部触发（cron-job.org）" 段填写 URL / Headers / body / 时间。
+5. 进 Actions 页面 → 选 "VIX Warning (cloud)" workflow → 点 "Run workflow" 手动跑一次验证。
+6. 验证通过后无需操作，每 30 分钟（北京 09:00-23:59）自动跑。
 
 ### 阶段 5：换标的 — iVIX/QVIX 替换为沪金 ✅ 已完成
 
@@ -274,8 +274,7 @@ Vix Warning System/
 ├── .env                    # 本地用：BARK_KEY 等（云端走 GitHub Secrets）
 ├── PROJECT_PLAN.md         # 本文档
 ├── .github/workflows/
-│   ├── vix-monitor.yml     # 核心检查：每 15 分钟跑 --once（阶段 4 ✅）
-│   └── keepalive-reminder.yml  # 每 55 天推 Bark 提醒去手动 Run 续 cron 计时（阶段 4 ✅）
+│   └── vix-monitor.yml     # 核心检查：跑 main.py --once；由 cron-job.org 外部触发（阶段 4 ✅）
 ├── venv/                   # 虚拟环境（不进 git）
 ├── src/
 │   ├── __init__.py
