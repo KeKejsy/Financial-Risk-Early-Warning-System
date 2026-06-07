@@ -25,9 +25,9 @@ jobs:
       BARK_SERVER: ${{ secrets.BARK_SERVER }}
       BARK_SOUND: ${{ secrets.BARK_SOUND }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
@@ -39,7 +39,7 @@ jobs:
 
       # 跨 run 复用去重状态。key 每次唯一，restore-keys 拉最近一份。
       - name: Restore dedup state
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: data
           key: dedup-${{ github.run_id }}-${{ github.run_attempt }}
@@ -51,7 +51,7 @@ jobs:
 
       - name: Upload log artifact (always)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: log-${{ github.run_id }}
           path: logs/
