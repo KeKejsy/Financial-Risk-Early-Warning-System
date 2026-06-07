@@ -1,4 +1,4 @@
-"""数据获取：CBOE VIX（Sina 实时 + CBOE 官方历史）+ 50ETF QVIX（AKShare）。"""
+"""数据获取：CBOE VIX（Sina 实时 + CBOE 官方历史）+ 沪金 AU 主力（AKShare）。"""
 from dataclasses import dataclass
 
 import akshare as ak
@@ -52,47 +52,22 @@ def get_vix_history(days: int = 252, timeout: float = 30) -> list[float]:
     return closes[-days:] if days else closes
 
 
-def get_qvix_50etf() -> Quote:
-    # 优先盘中分钟线
-    df = ak.index_option_50etf_min_qvix().dropna(subset=["qvix"])
-    if not df.empty:
-        latest = df.iloc[-1]
-        first = df.iloc[0]
-        change_pct = (
-            (latest["qvix"] - first["qvix"]) / first["qvix"] * 100
-            if first["qvix"]
-            else 0.0
-        )
-        return Quote(
-            name="50ETF QVIX (分钟)",
-            value=float(latest["qvix"]),
-            change_pct=float(change_pct),
-            timestamp=str(latest["time"]),
-        )
-    # 盘前/盘后回退到日线
-    d = ak.index_option_50etf_qvix().dropna(subset=["close"])
-    row = d.iloc[-1]
-    prev_close = d.iloc[-2]["close"]
-    change_pct = (row["close"] - prev_close) / prev_close * 100 if prev_close else 0.0
+def get_shfe_gold() -> Quote:
+    """SHFE 黄金期货主力合约（AU0）实时报价。
+    changepercent 是相对前结算价的小数（如 -0.029 = -2.9%）。
+    """
+    df = ak.futures_zh_realtime(symbol="黄金")
+    row = df[df["symbol"] == "AU0"].iloc[0]
     return Quote(
-        name="50ETF QVIX (日线)",
-        value=float(row["close"]),
-        change_pct=float(change_pct),
-        timestamp=str(row["date"]),
+        name="沪金主力 AU0",
+        value=float(row["trade"]),
+        change_pct=float(row["changepercent"]) * 100,
+        timestamp=f"{row['tradedate']} {row['ticktime']}",
     )
-
-
-def get_qvix_50etf_history(days: int = 252) -> list[float]:
-    """50ETF QVIX 日线收盘历史，按日期升序。"""
-    df = ak.index_option_50etf_qvix().dropna(subset=["close"])
-    return df["close"].tail(days).tolist() if days else df["close"].tolist()
 
 
 if __name__ == "__main__":
     print("VIX :", get_vix())
-    print("QVIX:", get_qvix_50etf())
+    print("GOLD:", get_shfe_gold())
     vh = get_vix_history()
-    qh = get_qvix_50etf_history()
     print(f"VIX  历史: {len(vh)} 行, 范围 [{min(vh):.2f}, {max(vh):.2f}]")
-    print(f"QVIX 历史: {len(qh)} 行, 范围 [{min(qh):.2f}, {max(qh):.2f}]")
-

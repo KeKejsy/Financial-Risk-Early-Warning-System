@@ -12,8 +12,7 @@ import yaml
 
 from src.data_fetcher import (
     Quote,
-    get_qvix_50etf,
-    get_qvix_50etf_history,
+    get_shfe_gold,
     get_vix,
     get_vix_history,
 )
@@ -47,14 +46,13 @@ class Context:
         with CONFIG_PATH.open(encoding="utf-8") as f:
             self.cfg = yaml.safe_load(f)
         self.vix_t = Thresholds.from_dict(self.cfg["vix"])
-        self.qvix_t = Thresholds.from_dict(self.cfg["qvix"])
         self.dedup = Deduper(STATE_FILE, self.cfg["dedup_hours"])
         self.quiet_start = self.cfg["quiet_hours"]["start"]
         self.quiet_end = self.cfg["quiet_hours"]["end"]
-        self.surge_pct = self.cfg["intraday_change_alert_pct"]
+        self.vix_surge_pct = self.cfg["vix"]["change_alert_pct"]
+        self.gold_surge_pct = self.cfg["gold"]["change_alert_pct"]
         self.window = self.cfg["percentile_window_days"]
         self.vix_history: list[float] = []
-        self.qvix_history: list[float] = []
         self._history_loaded_at: datetime | None = None
 
     def refresh_history(self, force: bool = False) -> None:
@@ -70,22 +68,24 @@ class Context:
             log.info(f"VIX 历史已加载: {len(self.vix_history)} 行")
         except Exception as e:
             log.warning(f"VIX 历史加载失败: {e}")
-        try:
-            self.qvix_history = get_qvix_50etf_history(self.window)
-            log.info(f"QVIX 历史已加载: {len(self.qvix_history)} 行")
-        except Exception as e:
-            log.warning(f"QVIX 历史加载失败: {e}")
         self._history_loaded_at = now
 
 
-def _send_alert(ctx: Context, label: str, q: Quote, level: str | None, history: list[float]) -> None:
+def _send_alert(
+    ctx: Context,
+    label: str,
+    q: Quote,
+    level: str | None,
+    history: list[float],
+    surge_pct: float,
+) -> None:
     """组装消息 → 去重 → 多通道分发；通过则 mark_sent。"""
     # 行情时间戳未变（如非交易时段 Sina 持续返回上一收盘）→ 直接跳过
     if ctx.dedup.is_repeat_quote(label, q.timestamp):
         log.info(f"{label}: 报价 timestamp {q.timestamp} 未刷新，跳过")
         return
 
-    surged = abs(q.change_pct) >= ctx.surge_pct
+    surged = abs(q.change_pct) >= surge_pct
     if not level and not surged:
         return
 
@@ -100,8 +100,8 @@ def _send_alert(ctx: Context, label: str, q: Quote, level: str | None, history: 
         log.info(f"{label}: '{key}' 在 {ctx.cfg['dedup_hours']}h 去重窗口内，跳过")
         return
 
-    pct = percentile_rank(q.value, history)
-    pct_str = f"  [{pct:.0f}% 分位]" if pct is not None else "  [分位:数据不足]"
+    pct = percentile_rank(q.value, history) if history else None
+    pct_str = f"  [{pct:.0f}% 分位]" if pct is not None else ""
     title = f"{label} {title_tag}: {q.value:.2f}{pct_str}"
     message = f"涨跌幅 {q.change_pct:+.2f}%  @ {q.timestamp}"
     urgent = level in ("恐慌", "极度恐慌")
@@ -130,16 +130,26 @@ def check_once(ctx: Context) -> None:
     try:
         v = get_vix()
         log.info(f"VIX  = {v.value:6.2f}  ({v.change_pct:+.2f}%)   @ {v.timestamp}")
-        _send_alert(ctx, "VIX", v, classify(v.value, ctx.vix_t), ctx.vix_history)
+        _send_alert(
+            ctx, "VIX", v,
+            classify(v.value, ctx.vix_t),
+            ctx.vix_history,
+            ctx.vix_surge_pct,
+        )
     except Exception as e:
         log.exception(f"取 VIX 失败: {e}")
 
     try:
-        q = get_qvix_50etf()
-        log.info(f"QVIX = {q.value:6.2f}  ({q.change_pct:+.2f}%)   @ {q.timestamp}  [{q.name}]")
-        _send_alert(ctx, "QVIX", q, classify(q.value, ctx.qvix_t), ctx.qvix_history)
+        g = get_shfe_gold()
+        log.info(f"沪金 = {g.value:7.2f}  ({g.change_pct:+.2f}%)   @ {g.timestamp}  [{g.name}]")
+        _send_alert(
+            ctx, "沪金", g,
+            level=None,           # 沪金不分等级，纯涨跌幅触发
+            history=[],           # 不算历史分位
+            surge_pct=ctx.gold_surge_pct,
+        )
     except Exception as e:
-        log.exception(f"取 QVIX 失败: {e}")
+        log.exception(f"取沪金失败: {e}")
 
 
 def main() -> None:

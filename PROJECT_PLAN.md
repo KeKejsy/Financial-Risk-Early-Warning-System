@@ -1,6 +1,6 @@
-# VIX & iVIX 恐慌指数预警系统 — 项目规划
+# VIX & 沪金预警系统 — 项目规划
 
-> 目标：实时监控美股 VIX 和 A 股 iVIX（50ETF 期权隐含波动率），当出现异常波动时通过**电脑弹窗** + **手机推送**及时提醒。
+> 目标：实时监控美股 VIX 恐慌指数和上海期货交易所黄金主力合约（AU0），当出现异常波动时通过**电脑弹窗** + **手机推送**及时提醒。
 
 ---
 
@@ -17,12 +17,12 @@
   - `> 30`：恐慌
   - `> 40`：极度恐慌（历史罕见）
 
-### 1.2 iVIX（中国波指）⚠️ 重点
-- **官方 iVIX 自 2018 年 2 月起已停止发布**，所以你**无法直接抓到一个叫 iVIX 的行情代码**。
-- 替代方案（业界通用做法）：
-  - 用上证 50ETF 期权 / 沪深 300ETF 期权的**期权链**，按 CBOE 的 VIX 白皮书公式自己计算。
-  - 或者使用第三方已计算好的数据接口（如 Tushare Pro 的 `index_daily` 中部分指数、AKShare 的 `index_option_50etf_qvix`）。
-- **推荐做法**：先用 AKShare 的现成接口（最省事），后续再考虑自己实现公式。
+### 1.2 沪金（SHFE 黄金主力合约 AU0）
+- 上海期货交易所黄金期货主力连续合约，代码 `AU0`。
+- 数据获取：AKShare `futures_zh_realtime(symbol='黄金')` 返回所有 AU 合约实时报价。
+- `changepercent` 字段是相对**前结算价**（不是前收盘价）的**小数**（如 `-0.029` = -2.9%），需乘 100 转百分数。
+- 阈值：`|涨跌幅| ≥ 2%` 触发"异动"告警。不分级、不算历史分位（金价长期趋势使分位意义不大）。
+- 交易时段：09:00-11:30、13:30-15:00、21:00-02:30 次日（夜盘）。
 
 ---
 
@@ -68,9 +68,9 @@
          ▼
 ┌─────────────────┐      ┌──────────────────┐
 │  数据获取模块   │─────▶│  指标计算模块    │
-│  - VIX          │      │  - 阈值判断      │
-│  - iVIX/QVIX    │      │  - 涨跌幅判断    │
-│  - 50ETF期权链  │      │  - 历史分位数    │
+│  - VIX (Sina)   │      │  - 阈值判断      │
+│  - 沪金 AU0     │      │  - 涨跌幅判断    │
+│  - VIX 历史     │      │  - 历史分位数    │
 └─────────────────┘      └────────┬─────────┘
                                   │ 触发警报
                                   ▼
@@ -95,11 +95,11 @@
 | --- | --- | --- |
 | `plyer` 弹窗 | **`winotify`** | `plyer` 在 Windows 上是用老的 WinRT API；`winotify` 是 Win10/11 原生 toast，活跃维护，支持点击回调与告警音。`win10toast-click` 试过，依赖已被移除的 `pkg_resources`，在 Python 3.14 上 import 即报错，弃用。 |
 | AKShare 取 VIX | **Sina 实时行情** `hq.sinajs.cn/list=znb_VIX` | AKShare 没有干净的 VIX 接口；Sina 的 `znb_VIX` 返回最新价、涨跌幅、时间，足够 MVP。需带 `Referer: https://finance.sina.com.cn/`。 |
-| AKShare 取 QVIX | `index_option_50etf_min_qvix` 优先 + `index_option_50etf_qvix` 兜底 | 分钟接口仅盘中有数据，盘前/盘后回退日线。AKShare 还有 300ETF/500ETF/创业板/科创板等多套 QVIX，后续可扩展。 |
+| AKShare 取 QVIX（已弃用） | ~~`index_option_50etf_min_qvix` + 日线兜底~~ | 阶段 5 用户改需求，去掉 iVIX/QVIX 通道，换成沪金。 |
 
 **已落地的代码**：
 
-- `src/data_fetcher.py`：`get_vix()` + `get_qvix_50etf()`，统一返回 `Quote(name, value, change_pct, timestamp)`。
+- `src/data_fetcher.py`：`get_vix()` + `get_shfe_gold()`（阶段 5 加入），统一返回 `Quote(name, value, change_pct, timestamp)`。
 - `src/notifier.py`：`desktop_popup(title, message, urgent=False)`，`urgent=True` 时使用循环警报音。
 - `main.py`：`check_once()` 单轮 + `schedule.every(5).minutes` 循环；阈值与异动判断写死在文件顶部（阶段 3 抽到 config）。
 - `logs/main.log`：UTF-8 日志，规避 Windows 控制台 GBK 乱码。
@@ -168,7 +168,7 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 | 需求 | 实际实现 | 备注 |
 | --- | --- | --- |
 | VIX 历史 252 日 | **CBOE 官方 CSV** `cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv` | Yahoo/Stooq/Sina 日 K/EastMoney 都试过：Yahoo 国内 403、Stooq PoW 反爬、Sina 美股日 K 返回 null、EastMoney 没收录 VIX 现货指数。CBOE 官方 CSV 1990 年至今完整，469KB，一次拉取常驻内存。 |
-| QVIX 历史 252 日 | `ak.index_option_50etf_qvix()` | 直接返回 2700+ 行日线，tail(252) 即可。 |
+| QVIX 历史 252 日（已弃用） | ~~`ak.index_option_50etf_qvix()`~~ | 阶段 5 弃用整个 QVIX 通道。 |
 | 分级（含反向 `warn_low`） | `src/indicators.py::classify` | "过度平静" 作为反向告警等级。 |
 | 历史分位 | `src/indicators.py::percentile_rank` | 样本 < 30 行返回 None（告警中显示"数据不足"）。 |
 | 去重 | `src/indicators.py::Deduper` | 两层去重：(1) `should_send/mark_sent` 同警报 key 在 N 小时窗口内不重复（key = `"{label}_{level_or_异动}"`）；(2) `is_repeat_quote/mark_quote_seen` 同 label 的同一笔行情 timestamp 只推一次。**非交易时段 Sina 持续返回上一收盘价 → 第二层会拦下重复推送**。状态持久化到 `data/dedup.json`，程序重启不丢。 |
@@ -179,7 +179,7 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 
 - 新增 `config.yaml`：所有阈值集中管理。
 - 新增 `src/indicators.py`：`Thresholds` / `classify` / `percentile_rank` / `in_quiet_hours` / `Deduper`。
-- 改 `src/data_fetcher.py`：新增 `get_vix_history(days=252)` 和 `get_qvix_50etf_history(days=252)`。
+- 改 `src/data_fetcher.py`：新增 `get_vix_history(days=252)`。（QVIX 历史函数后续阶段 5 移除。）
 - 改 `main.py`：引入 `Context` 类（启动加载 config + 历史 + Deduper），`_send_alert` 整合分级 / 分位 / 静默 / 去重 / 多通道分发；告警标题附 `[N% 分位]`。
 - 改 `.gitignore`：新增 `data/`（dedup 状态目录）。
 
@@ -230,10 +230,24 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 3. 进 Actions 页面 → 选 "VIX Warning (cloud)" workflow → 点 "Run workflow" 手动跑一次验证。
 4. 验证通过后无需操作，每 15 分钟（北京 09:00-23:59）自动跑。
 
-### 阶段 5（可选）：自己算 iVIX
-1. 拉取 50ETF 期权链：AKShare 的 `option_finance_board`。
-2. 实现 CBOE VIX 白皮书公式（涉及无风险利率、远期价格、期权加权方差）。
-3. 与 AKShare 的 QVIX 对比验证，差异 < 1% 即可。
+### 阶段 5：换标的 — iVIX/QVIX 替换为沪金 ✅ 已完成
+
+**起因**：iVIX 替代用的 QVIX 实际意义有限（用户更关心黄金避险标的）。改成监控 SHFE 黄金主力合约 AU0，触发条件简化为 `|涨跌幅| ≥ 2%`。
+
+**改动**：
+
+- `src/data_fetcher.py`：删 `get_qvix_50etf()` / `get_qvix_50etf_history()`；新增 `get_shfe_gold()`，调用 `ak.futures_zh_realtime(symbol='黄金')` 取 AU0 主力行。注意 `changepercent` 是小数，乘 100。
+- `config.yaml`：删 `qvix` 块；`vix` 块下新增 `change_alert_pct: 20.0`（VIX 自己的异动阈值）；新增 `gold` 块 `change_alert_pct: 2.0`。删全局 `intraday_change_alert_pct`。
+- `main.py`：
+  - `Context` 删 `qvix_t` / `qvix_history` / `surge_pct`；新增 `vix_surge_pct` / `gold_surge_pct`。
+  - `_send_alert()` 增 `surge_pct` 参数；`history` 为空时不显示分位（避免出现"[分位:数据不足]"这种不必要的提示）。
+  - `check_once` 沪金分支：`level=None, history=[], surge_pct=ctx.gold_surge_pct`，仅靠涨跌幅触发。
+- 行情时间戳去重对沪金同样生效（夜盘收盘后 Sina 持续返回同一收盘价 → 自动跳过）。
+
+**验收（本地）**：
+
+- ✅ `--once` 测试：VIX 21.50 +39.7% 推"警戒 [86% 分位]"；沪金 949.40 -2.93% 推"异动"，无分位字段。
+- ✅ `dedup.json` 含 4 个 key：`VIX_警戒`、`__last_ts__VIX`、`沪金_异动`、`__last_ts__沪金`。
 
 ---
 
@@ -252,7 +266,7 @@ Vix Warning System/
 ├── venv/                   # 虚拟环境（不进 git）
 ├── src/
 │   ├── __init__.py
-│   ├── data_fetcher.py     # get_vix/get_qvix + get_vix_history/get_qvix_50etf_history  ✅
+│   ├── data_fetcher.py     # get_vix + get_vix_history + get_shfe_gold（阶段 5 ✅）
 │   ├── notifier.py         # desktop_popup（跨平台守护）+ bark_push()  ✅
 │   └── indicators.py       # Thresholds/classify/percentile_rank/in_quiet_hours/Deduper  ✅
 ├── data/                   # 运行时状态（云端走 actions/cache，本地走文件）
@@ -265,7 +279,7 @@ Vix Warning System/
 
 ## 六、注意事项与坑
 
-1. **A 股交易时段**：iVIX 只在 9:30–15:00 有效，其他时段不要触发"实时"警报。
+1. **A 股交易时段 / 沪金交易时段**：沪金主力交易时段是 09:00-11:30、13:30-15:00、21:00-02:30 次日。非交易时段 Sina 返回上一收盘价，由"行情 timestamp 去重"保证不重复推送。
 2. **VIX 时区**：美东时间 9:30–16:00 才有日内数据（DST 时 = 北京 21:30–04:00；标准时 = 22:30–05:00）。非交易时段 Sina 持续返回上一收盘价 → 由 `Deduper` 的"行情 timestamp 去重"保证每个收盘只触发一次告警（先到达本逻辑的那次推送）。
 3. **数据延迟**：免费接口通常延迟 15 分钟，对预警场景一般够用。
 4. **接口限流**：AKShare 与 Sina 行情都有频率限制，调度间隔不要短于 1 分钟。
@@ -281,7 +295,7 @@ Vix Warning System/
 - **分模块开发**：每次让 Claude Code 只做一个模块（先 `data_fetcher.py`，再 `notifier.py`），便于检查。
 - **先跑通再优化**：MVP 阶段不要追求架构完美，能弹窗就是胜利。
 - **真实测试**：每写完一个推送通道，立刻让 Claude Code 帮你写一个 `test_xxx.py` 实测一次。
-- **遇到 iVIX 计算时**：把 CBOE 的 VIX 白皮书 PDF 喂给 Claude，让它对照公式实现，比直接让它"凭印象"写更靠谱。
+- **遇到要扩新标的时**：参考阶段 5 给沪金加通道的做法 — `data_fetcher.py` 加一个 `get_xxx()` 函数返回 `Quote`，`config.yaml` 加阈值块，`main.py::check_once` 加一个 `_send_alert(...)` 调用即可。
 
 ---
 

@@ -1,21 +1,17 @@
 # 阈值与运行参数集中管理。修改后重启 main.py 生效。
 
 vix:
-  warn_high: 20      # >= 20 警戒
-  panic: 30          # >= 30 恐慌
-  extreme: 40        # >= 40 极度恐慌
-  warn_low: 13       # < 13 过度平静（反向告警）
+  warn_high: 20            # >= 20 警戒
+  panic: 30                # >= 30 恐慌
+  extreme: 40              # >= 40 极度恐慌
+  warn_low: 13             # < 13 过度平静（反向告警）
+  change_alert_pct: 20.0   # 当日 |涨跌幅| 超此阈值额外异动告警
 
-qvix:
-  warn_high: 25
-  panic: 35
-  extreme: null
-  warn_low: null
+gold:
+  # 沪金 AU 主力。无多级阈值、不算历史分位，只看涨跌幅。
+  change_alert_pct: 2.0    # |涨跌幅| >= 2% 即推送
 
-# 单次检查中，当日涨/跌幅绝对值超此阈值额外告警
-intraday_change_alert_pct: 20.0
-
-# 调度间隔（分钟）
+# 调度间隔（分钟，本地常驻模式使用；云端走 workflow cron）
 interval_min: 5
 
 # 同一告警键在此小时数内不重复推送
@@ -26,5 +22,5 @@ quiet_hours:
   start: "00:00"
   end: "09:00"
 
-# 历史分位数所用窗口（交易日数；< 30 行不算分位）
+# 历史分位数所用窗口（交易日数；< 30 行不算分位）。仅 VIX 使用。
 percentile_window_days: 252
