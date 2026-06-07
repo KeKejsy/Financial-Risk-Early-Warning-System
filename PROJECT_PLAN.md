@@ -203,7 +203,7 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 | 容器每次销毁，`data/dedup.json` 不持久 | 用 `actions/cache@v5` 把整个 `data/` 目录跨 run 复用（key 唯一 + restore-keys 前缀匹配） |
 | `.env` 不能进仓库 | `BARK_KEY` 等通过 **GitHub Secrets** 注入到环境变量 |
 | 容器是 UTC 时间 | workflow 顶层 `env: TZ: Asia/Shanghai`，`datetime.now()` 自动返回北京时间 |
-| 仓库 60 天无活动会自动停 cron | 写进文档，需要时进 Actions 手动重启 |
+| 仓库 60 天无 user-triggered 活动会自动停 cron | 新增 `keepalive-reminder.yml`：每天探，距上次提醒 ≥ 55 天才推 Bark，提醒用户去手动 Run workflow 重置计时 |
 | Python 3.14 在 Linux 上 wheel 不全 | Actions 用 **Python 3.12**（本地仍用 3.14；代码只使用 3.10+ 共有语法） |
 | pandas/numpy 等编译耗时 | `actions/setup-python` 的 `cache: pip` 复用 pip wheel 缓存，二次起接近秒级 |
 
@@ -213,12 +213,21 @@ BARK_SOUND=alarm                          # 紧急级别使用的铃声
 - `src/notifier.py`：`winotify` 改成 `try/except ImportError`；`desktop_popup` 在非 Windows 抛 `RuntimeError`，被 `main.py` 的 try/except 捕获记 WARN。env 读取容空（`BARK_SERVER`/`BARK_SOUND` 未配置时回落到代码默认）。
 - `requirements.txt`：精简为直接依赖，`winotify` 加 `sys_platform == "win32"` 平台标记。Linux Actions 自动跳过 winotify 安装。
 
-**workflow 文件**：`.github/workflows/vix-check.yml`
+**workflow 文件**：
+
+`.github/workflows/vix-check.yml` — 核心检查
 
 - 触发：`cron: '*/15 1-15 * * *'`（UTC = 北京时间 09:00–23:59，与 `quiet_hours` 对齐，省 CI 分钟）+ `workflow_dispatch` 手动触发。
 - 并发：`concurrency: group: vix-check, cancel-in-progress: false`，避免上一次未跑完下一次覆盖 dedup。
 - 步骤：checkout → setup-python 3.12 → install deps → 恢复 dedup cache → `python main.py --once` → 上传 `logs/` artifact（7 天保留）。
 - 超时：`timeout-minutes: 5`。
+
+`.github/workflows/keepalive-reminder.yml` — 保活提醒
+
+- 触发：`cron: '7 6 * * *'`（每天 UTC 06:07 = 北京 14:07）+ `workflow_dispatch`。
+- 用 `actions/cache@v5` 持久化 `.last_reminder`（unix 秒数时间戳）；每次比较距今天数 ≥ 55 才推 Bark。
+- 推送内容含 `vix-check.yml` 的 Actions 链接，点过去手动 Run 即可重置 60 天 cron 计时。
+- 失败保护：curl `--fail` + `set -e`，推送失败则 `.last_reminder` 不更新，次日自动重试。
 
 **用户手动操作（一次性）**：
 
@@ -262,7 +271,8 @@ Vix Warning System/
 ├── .env                    # 本地用：BARK_KEY 等（云端走 GitHub Secrets）
 ├── PROJECT_PLAN.md         # 本文档
 ├── .github/workflows/
-│   └── vix-check.yml       # GitHub Actions：每 15 分钟跑 --once（阶段 4 ✅）
+│   ├── vix-check.yml       # 核心检查：每 15 分钟跑 --once（阶段 4 ✅）
+│   └── keepalive-reminder.yml  # 每 55 天推 Bark 提醒去手动 Run 续 cron 计时（阶段 4 ✅）
 ├── venv/                   # 虚拟环境（不进 git）
 ├── src/
 │   ├── __init__.py
